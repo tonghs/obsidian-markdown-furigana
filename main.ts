@@ -1,6 +1,14 @@
-import { Plugin, MarkdownPostProcessor, MarkdownPostProcessorContext } from 'obsidian'
-import { RangeSetBuilder } from "@codemirror/state"
+import { App, Plugin, PluginSettingTab, Setting, MarkdownPostProcessor, MarkdownPostProcessorContext } from 'obsidian'
+import { Extension, RangeSetBuilder } from "@codemirror/state"
 import { ViewPlugin, WidgetType, EditorView, ViewUpdate, Decoration, DecorationSet } from '@codemirror/view'
+
+interface MarkdownFuriganaSettings {
+  livePreviewEnabled: boolean
+}
+
+const DEFAULT_SETTINGS: MarkdownFuriganaSettings = {
+  livePreviewEnabled: true,
+}
 
 // Regular Expression for {{kanji|kana|kana|...}} format
 const REGEXP = /{((?:[\u2E80-\uA4CF\uFF00-\uFFEF])+)((?:\\?\|[^ -\/{-~:-@\[-`]*)+)}/gm;
@@ -32,6 +40,9 @@ const convertFurigana = (element: Text): Node => {
 }
 
 export default class MarkdownFurigana extends Plugin {
+  settings: MarkdownFuriganaSettings
+  private editorExtensions: Extension[] = []
+
   public postprocessor: MarkdownPostProcessor = (el: HTMLElement, ctx: MarkdownPostProcessorContext) => {
     const blockToReplace = el.querySelectorAll(TAGS)
     if (blockToReplace.length === 0) return
@@ -59,12 +70,58 @@ export default class MarkdownFurigana extends Plugin {
 
   async onload() {
     console.log('loading Markdown Furigana plugin')
+    await this.loadSettings()
     this.registerMarkdownPostProcessor(this.postprocessor)
-    this.registerEditorExtension(viewPlugin)
+    this.registerEditorExtension(this.editorExtensions)
+    this.refreshEditorExtensions()
+    this.addSettingTab(new MarkdownFuriganaSettingTab(this.app, this))
   }
 
   onunload() {
     console.log('unloading Markdown Furigana plugin')
+  }
+
+  refreshEditorExtensions() {
+    this.editorExtensions.length = 0
+    if (this.settings.livePreviewEnabled) {
+      this.editorExtensions.push(viewPlugin)
+    }
+    this.app.workspace.updateOptions()
+  }
+
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData())
+  }
+
+  async saveSettings() {
+    await this.saveData(this.settings)
+  }
+}
+
+class MarkdownFuriganaSettingTab extends PluginSettingTab {
+  plugin: MarkdownFurigana
+
+  constructor(app: App, plugin: MarkdownFurigana) {
+    super(app, plugin)
+    this.plugin = plugin
+  }
+
+  display(): void {
+    const { containerEl } = this
+    containerEl.empty()
+
+    new Setting(containerEl)
+      .setName('Live preview in edit mode')
+      .setDesc('Render furigana while editing. Turn off to show raw {kanji|kana} text in the editor and avoid cursor jumping.')
+      .addToggle(toggle =>
+        toggle
+          .setValue(this.plugin.settings.livePreviewEnabled)
+          .onChange(async (value) => {
+            this.plugin.settings.livePreviewEnabled = value
+            await this.plugin.saveSettings()
+            this.plugin.refreshEditorExtensions()
+          })
+      )
   }
 }
 
